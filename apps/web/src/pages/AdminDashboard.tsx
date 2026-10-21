@@ -145,6 +145,33 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Purpose Explanation Card */}
+        <div className="bg-[#0B1019]/85 border border-[#00F5A0]/20 rounded-2xl p-5 shadow-sm backdrop-blur-xl">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/20 text-[#00F5A0] shrink-0 mt-0.5">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-xs font-bold uppercase tracking-wider font-mono text-[#00F5A0]">
+                Why this Audit & Compliance Portal exists
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                ResumeIQ uses automated AI algorithms to extract competencies and compute ATS match percentages. To comply with modern AI employment regulations (including NYC Local Law 144 and EU AI Act transparent audit mandates), every single automated scoring calculation, resume upload, and recruiter action is cryptographically signed and stored in this immutable audit ledger.
+              </p>
+              <div className="pt-2 flex flex-wrap gap-4 text-[11px] text-slate-400 font-mono">
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <Lock className="h-3.5 w-3.5 text-[#FFA133]" />
+                  <span>Fixed Admin Credentials: <strong className="text-white">admin@resumeiq.com</strong></span>
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-300">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-[#00F5A0]" />
+                  <span>Public Demo Disabled (Admin Role Restricted)</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Audit Log View */}
         {activeTab === 'audit' && (
           <div className="space-y-4">

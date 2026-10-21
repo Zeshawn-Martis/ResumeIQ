@@ -15,9 +15,9 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     setError('');
     try {
-      await login(email, password);
-      if (email.includes('recruiter')) navigate('/recruiter');
-      else if (email.includes('admin')) navigate('/admin');
+      const loggedInUser = await login(email, password);
+      if (loggedInUser.role === 'recruiter') navigate('/recruiter');
+      else if (loggedInUser.role === 'admin') navigate('/admin');
       else navigate('/candidate');
     } catch (err: any) {
       setError(err.message || 'Invalid credentials. Please try again.');
@@ -32,7 +32,6 @@ export const LoginPage: React.FC = () => {
   const quickLogins = [
     { label: 'Candidate', email: 'candidate@demo.com', role: '/candidate' },
     { label: 'Recruiter', email: 'recruiter@demo.com', role: '/recruiter' },
-    { label: 'Admin', email: 'admin@demo.com', role: '/admin' },
   ];
 
   return (
@@ -155,7 +154,7 @@ export const LoginPage: React.FC = () => {
               <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Quick Preset Logins</span>
               <div className="flex-1 h-px bg-white/[0.08]" />
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {quickLogins.map(({ label, email: qEmail }) => (
                 <button
                   key={label}
@@ -169,6 +168,11 @@ export const LoginPage: React.FC = () => {
                   {label}
                 </button>
               ))}
+            </div>
+            <div className="mt-3 p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] text-center">
+              <p className="text-[10px] text-slate-400 font-mono">
+                Administrator Access: Restricted to designated administrators (<span className="text-slate-300">admin@resumeiq.com</span>). Public demo disabled.
+              </p>
             </div>
           </div>
 

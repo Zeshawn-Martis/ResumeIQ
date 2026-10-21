@@ -30,14 +30,6 @@ const ROLES: { value: UserRole; icon: React.ElementType; label: string; desc: st
     badge: 'Hiring Lead',
     hex: '#00C9FF',
   },
-  {
-    value: 'admin',
-    icon: ShieldCheck,
-    label: 'Admin',
-    desc: 'Audit logs, bias compliance & governance',
-    badge: 'Compliance',
-    hex: '#00F5A0',
-  },
 ];
 
 export const RegisterPage: React.FC = () => {

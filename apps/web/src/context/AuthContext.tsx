@@ -4,8 +4,8 @@ import { User, UserRole } from '../types';
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (email: string, pass: string) => Promise<void>;
-  register: (email: string, pass: string, role: UserRole, name?: string) => Promise<void>;
+  login: (email: string, pass: string) => Promise<User>;
+  register: (email: string, pass: string, role: UserRole, name?: string) => Promise<User>;
   continueAsGuest: () => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -38,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [token]);
 
-  const login = async (email: string, pass: string) => {
+  const login = async (email: string, pass: string): Promise<User> => {
     setLoading(true);
     try {
       const res = await fetch('/api/auth/login', {
@@ -46,18 +46,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: pass })
       });
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Unable to reach the API server. Please ensure the backend is running on port 5000.');
+      }
       if (!res.ok) throw new Error(data.error || 'Invalid email or password.');
       setUser(data.user);
       setToken(data.token);
-    } catch (e: any) {
-      throw e;
+      return data.user;
     } finally {
       setLoading(false);
     }
   };
 
-  const register = async (email: string, pass: string, role: UserRole, name?: string) => {
+  const register = async (email: string, pass: string, role: UserRole, name?: string): Promise<User> => {
     setLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
@@ -65,12 +69,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: pass, role, name })
       });
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Unable to reach the API server. Please ensure the backend is running on port 5000.');
+      }
       if (!res.ok) throw new Error(data.error || 'Registration failed.');
       setUser(data.user);
       setToken(data.token);
-    } catch (e: any) {
-      throw e;
+      return data.user;
     } finally {
       setLoading(false);
     }
@@ -80,15 +88,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       const res = await fetch('/api/auth/guest', { method: 'POST' });
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Unable to reach the API server. Please ensure the backend is running on port 5000.');
+      }
       if (res.ok) {
         setUser(data.user);
         setToken(data.token);
       } else {
-        throw new Error(data.error);
+        throw new Error(data.error || 'Guest initialization failed.');
       }
-    } catch (e: any) {
-      throw e;
     } finally {
       setLoading(false);
     }

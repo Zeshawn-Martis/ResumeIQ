@@ -18,7 +18,7 @@ router.post('/register', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const userRole = role && ['candidate', 'recruiter', 'admin'].includes(role) ? role : 'candidate';
+    const userRole = role && ['candidate', 'recruiter'].includes(role) ? role : 'candidate';
 
     const user = await prisma.user.create({
       data: {

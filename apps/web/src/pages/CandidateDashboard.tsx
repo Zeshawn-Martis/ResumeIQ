@@ -6,13 +6,7 @@ import { SkillGapMatrix } from '../components/SkillGapMatrix';
 import { TailoredDiffView } from '../components/TailoredDiffView';
 import { EmptyState } from '../components/EmptyState';
 import { ConfettiCelebration } from '../components/ConfettiCelebration';
-import { 
-  DEMO_PRESET_RESUMES, 
-  DEMO_JOBS, 
-  generateSimulatedMatch, 
-  generateSimulatedTailoredResult, 
-  DemoPresetResume 
-} from '../mockData';
+import { DEMO_JOBS } from '../mockData';
 import { 
   UploadCloud, 
   FileText, 
@@ -23,35 +17,31 @@ import {
   RotateCcw, 
   Layers, 
   AlertCircle, 
-  Zap,
+  Key,
   Check,
   FileCheck,
   Building,
-  UserCheck,
-  ArrowRight
+  ArrowRight,
+  Printer
 } from 'lucide-react';
 
 export const CandidateDashboard: React.FC = () => {
   const { user, token } = useAuth();
 
   const [resumes, setResumes] = useState<ResumeVersion[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState<string>('');
   const [jobs, setJobs] = useState<JobPosting[]>(DEMO_JOBS);
   const [selectedJobId, setSelectedJobId] = useState<string>(DEMO_JOBS[0].id);
   const [customJdText, setCustomJdText] = useState<string>('');
-  
-  // Active input mode: 'file' | 'preset'
-  const [uploadMode, setUploadMode] = useState<'file' | 'preset'>('preset');
-  const [selectedPreset, setSelectedPreset] = useState<DemoPresetResume>(DEMO_PRESET_RESUMES[0]);
 
   // File Upload State
   const [file, setFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [validationError, setValidationError] = useState<string>('');
-  const [isDemoFallback, setIsDemoFallback] = useState(false);
 
   // Analysis & Pipeline States
-  const [pipelineState, setPipelineState] = useState<'idle' | 'parsing' | 'embedding' | 'scoring' | 'done'>('idle');
+  const [pipelineState, setPipelineState] = useState<'idle' | 'uploading' | 'parsing' | 'embedding' | 'scoring' | 'done'>('idle');
   const [activeMatch, setActiveMatch] = useState<MatchResult | null>(null);
   const [tailoredResult, setTailoredResult] = useState<any | null>(null);
   const [loadingTailor, setLoadingTailor] = useState(false);
@@ -74,7 +64,6 @@ export const CandidateDashboard: React.FC = () => {
         }
       }
     } catch {
-      // Fallback to rich DEMO_JOBS
       setJobs(DEMO_JOBS);
       setSelectedJobId(DEMO_JOBS[0].id);
     }
@@ -88,10 +77,15 @@ export const CandidateDashboard: React.FC = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        setResumes(data);
+        if (Array.isArray(data)) {
+          setResumes(data);
+          if (data.length > 0 && !selectedResumeId) {
+            setSelectedResumeId(data[0].id);
+          }
+        }
       }
     } catch {
-      // Silent catch
+      // ignore
     }
   };
 
@@ -103,7 +97,6 @@ export const CandidateDashboard: React.FC = () => {
     setActiveMatch(null);
     setTailoredResult(null);
     setCustomJdText('');
-    setIsDemoFallback(false);
     setShowConfetti(false);
   };
 
@@ -133,7 +126,7 @@ export const CandidateDashboard: React.FC = () => {
       setActiveMatch(null);
       setTailoredResult(null);
       setPipelineState('idle');
-      setUploadMode('file');
+      setSelectedResumeId('');
     }
   };
 
@@ -144,7 +137,7 @@ export const CandidateDashboard: React.FC = () => {
       setActiveMatch(null);
       setTailoredResult(null);
       setPipelineState('idle');
-      setUploadMode('file');
+      setSelectedResumeId('');
     }
   };
 
@@ -153,59 +146,49 @@ export const CandidateDashboard: React.FC = () => {
     setActiveMatch(null);
     setTailoredResult(null);
 
+    // Mandatory upload validation: either a file has been selected or an existing uploaded resume is picked
+    if (!file && !selectedResumeId) {
+      setValidationError('Resume upload required: Please upload a resume PDF/DOCX file to compute your ATS score.');
+      return;
+    }
+
     const targetJob = jobs.find(j => j.id === selectedJobId) || DEMO_JOBS[0];
-
-    // If using Preset Resume
-    if (uploadMode === 'preset') {
-      setPipelineState('parsing');
-      await new Promise(r => setTimeout(r, 450));
-      setPipelineState('embedding');
-      await new Promise(r => setTimeout(r, 550));
-      setPipelineState('scoring');
-      await new Promise(r => setTimeout(r, 400));
-
-      const simMatch = generateSimulatedMatch(selectedPreset, targetJob);
-      setActiveMatch(simMatch);
-      setIsDemoFallback(true);
-      setPipelineState('done');
-      // Trigger confetti for strong scores
-      if (simMatch.finalScore >= 75) {
-        setShowConfetti(true);
-        setTimeout(() => setShowConfetti(false), 4200);
-      }
-      return;
-    }
-
-    // If uploading custom file
-    if (!file) {
-      setValidationError('Please upload a resume file (PDF or DOCX) or select a demo preset.');
-      return;
-    }
-
-    setPipelineState('parsing');
+    let resumeIdToScore = selectedResumeId;
 
     try {
-      const formData = new FormData();
-      formData.append('resume', file);
-      
-      const uploadRes = await fetch('/api/resumes/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
+      // 1. If user provided a new file, upload and parse it
+      if (file) {
+        setPipelineState('uploading');
+        const formData = new FormData();
+        formData.append('resume', file);
+        
+        const uploadRes = await fetch('/api/resumes/upload', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
 
-      if (!uploadRes.ok) {
-        throw new Error('API server returned error during parsing');
+        if (!uploadRes.ok) {
+          const errData = await uploadRes.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to upload and parse resume document.');
+        }
+
+        const uploadData = await uploadRes.json();
+        resumeIdToScore = uploadData.resume?.id;
+        if (!resumeIdToScore) throw new Error('Resume record was not created properly.');
+        
+        setSelectedResumeId(resumeIdToScore);
+        fetchResumes();
       }
 
-      const uploadData = await uploadRes.json();
-      const currentResumeId = uploadData.resume?.id;
-      if (!currentResumeId) throw new Error('Resume record missing');
-      fetchResumes();
-
+      // 2. Parse & Embedding stage
+      setPipelineState('parsing');
+      await new Promise(r => setTimeout(r, 400));
+      
       setPipelineState('embedding');
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, 500));
 
+      // 3. True Hybrid ATS Match Scoring
       setPipelineState('scoring');
       const scoreRes = await fetch('/api/matches/score', {
         method: 'POST',
@@ -214,51 +197,37 @@ export const CandidateDashboard: React.FC = () => {
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          resumeId: currentResumeId,
+          resumeId: resumeIdToScore,
           jobPostingId: selectedJobId || undefined,
           jobDescriptionText: customJdText || targetJob.descriptionRaw || ''
         })
       });
 
-      if (!scoreRes.ok) throw new Error('Scoring computation failed');
+      if (!scoreRes.ok) {
+        const errData = await scoreRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'ATS scoring engine computation failed. Ensure GEMINI_API_KEY is configured.');
+      }
+
       const matchData = await scoreRes.json();
       setActiveMatch(matchData);
-      setIsDemoFallback(false);
       setPipelineState('done');
+
       if (matchData.finalScore >= 75) {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 4200);
       }
 
     } catch (e: any) {
-      // GRACEFUL FALLBACK TO PRECOMPUTED REALISTIC AI DATA
-      console.warn('Backend unavailable, engaging simulated fallback:', e.message);
-      setIsDemoFallback(true);
-      setPipelineState('embedding');
-      await new Promise(r => setTimeout(r, 450));
-      setPipelineState('scoring');
-      await new Promise(r => setTimeout(r, 400));
-
-      const fallbackMatch = generateSimulatedMatch(
-        {
-          ...selectedPreset,
-          candidateName: file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' '),
-          fileName: file.name
-        },
-        targetJob
-      );
-      setActiveMatch(fallbackMatch);
-      setPipelineState('done');
-      if (fallbackMatch.finalScore >= 75) {
-        setShowConfetti(true);
-        setTimeout(() => setShowConfetti(false), 4200);
-      }
+      console.error('Scoring error:', e);
+      setValidationError(e.message || 'Error occurred while computing ATS score.');
+      setPipelineState('idle');
     }
   };
 
   const handleGenerateTailored = async () => {
     if (!activeMatch) return;
     setLoadingTailor(true);
+    setValidationError('');
 
     const targetJob = jobs.find(j => j.id === selectedJobId) || DEMO_JOBS[0];
 
@@ -280,27 +249,26 @@ export const CandidateDashboard: React.FC = () => {
         setTailoredResult(data);
         fetchResumes();
       } else {
-        throw new Error('Tailoring API failed');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Tailoring service returned an error.');
       }
-    } catch {
-      // Fallback to high quality precomputed diff
-      await new Promise(r => setTimeout(r, 900));
-      const simTailor = generateSimulatedTailoredResult(activeMatch, targetJob);
-      setTailoredResult(simTailor);
+    } catch (e: any) {
+      setValidationError(e.message || 'Failed to generate tailored resume. Verify Gemini API key.');
     } finally {
       setLoadingTailor(false);
     }
   };
 
   const currentSelectedJob = jobs.find(j => j.id === selectedJobId) || jobs[0] || DEMO_JOBS[0];
+  const hasResumeReady = Boolean(file || selectedResumeId);
 
   return (
     <div className="relative min-h-screen">
       {/* Confetti celebration */}
       <ConfettiCelebration active={showConfetti} score={activeMatch?.finalScore || 0} />
 
-      {/* Background radial ambient glow */}
-      <div className="absolute top-0 inset-x-0 h-96 bg-radial-glow-hero pointer-events-none" />
+      {/* Top Background Glow */}
+      <div className="absolute top-0 inset-x-0 h-96 bg-gradient-to-b from-[#FF5C00]/10 via-[#0B1019]/5 to-transparent pointer-events-none" />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 space-y-8 relative z-10">
         
@@ -311,28 +279,26 @@ export const CandidateDashboard: React.FC = () => {
               <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#FF5C00]">
                 Candidate ATS Optimization Studio
               </span>
-              {isDemoFallback && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                  Simulated AI Embeddings
-                </span>
-              )}
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-[#00F5A0]/10 text-[#00F5A0] border border-[#00F5A0]/20">
+                Hybrid Gemini Embeddings Active
+              </span>
             </div>
             <h1 className="font-display text-2xl font-bold text-white mt-1 tracking-tight">
-              Resume Diagnostics & Keyword Tailoring
+              Resume Diagnostics &amp; Keyword Tailoring
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-2xl font-sans">
-              Inspect your ATS match percentage with explicit lexical vs. semantic contribution weights, diagnose missing requisition skills, and generate verified bullet points.
+              Upload your genuine resume to compute true ATS scores, inspect missing requirements, and generate an executive 1-page tailored resume.
             </p>
           </div>
 
           <div className="flex items-center gap-2.5">
             <button
               onClick={handleResetWorkspace}
-              className="px-3.5 py-2 btn-secondary-obsidian text-slate-300 hover:text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-sm"
+              className="px-3.5 py-2 rounded-xl bg-[#05070B] border border-white/[0.10] hover:border-white/[0.20] text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
               title="Clear current state and reset workspace"
             >
               <RotateCcw className="h-3.5 w-3.5 text-[#FFA133]" />
-              <span>Reset Workspace</span>
+              <span>Reset</span>
             </button>
           </div>
         </div>
@@ -341,349 +307,301 @@ export const CandidateDashboard: React.FC = () => {
         {validationError && (
           <div className="p-4 bg-rose-950/80 border border-rose-800 text-rose-300 text-xs rounded-xl flex items-center gap-2.5 animate-in fade-in">
             <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-            <span>{validationError}</span>
+            <div className="flex-1">
+              <strong className="block font-semibold">Validation Notice</strong>
+              <span>{validationError}</span>
+            </div>
           </div>
         )}
 
         {/* Main Grid: Upload & JD Selection */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           
-          {/* Card 1: Resume Source (Upload or Presets) */}
+          {/* Card 1: Resume Upload (Mandatory) */}
           <div className="bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl p-6 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl flex flex-col justify-between space-y-4">
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-display text-xs font-bold uppercase tracking-wider text-white flex items-center gap-2">
                   <FileText className="h-4 w-4 text-[#FF5C00]" />
-                  1. Resume Source Selection
+                  1. Resume Document (Required)
                 </h2>
-                
-                {/* Switcher tabs */}
-                <div className="flex bg-[#05070B] p-1 rounded-xl border border-white/[0.08]">
-                  <button
-                    type="button"
-                    onClick={() => { setUploadMode('preset'); setValidationError(''); }}
-                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                      uploadMode === 'preset'
-                        ? 'bg-[#FF5C00] text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Demo Presets (Instant)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setUploadMode('file'); setValidationError(''); }}
-                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                      uploadMode === 'file'
-                        ? 'bg-[#FF5C00] text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Upload Custom PDF
-                  </button>
-                </div>
+                {file && (
+                  <span className="text-[11px] font-mono text-[#00F5A0] font-semibold">
+                    File Selected
+                  </span>
+                )}
               </div>
 
-              {/* Mode A: Demo Preset Selector */}
-              {uploadMode === 'preset' ? (
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-400">
-                    Test the entire pipeline instantly without needing a PDF file:
+              {/* Upload Drag & Drop Box */}
+              <div
+                onDragEnter={handleDrag}
+                onDragLeave={handleDrag}
+                onDragOver={handleDrag}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                  file 
+                    ? 'border-[#00F5A0]/50 bg-[#00F5A0]/10' 
+                    : (dragActive ? 'border-[#FF5C00] bg-[#FF5C00]/15' : 'border-white/[0.12] hover:border-[#FF5C00]/40 bg-[#05070B]')
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  id="resume-upload"
+                  accept=".pdf,.docx,.doc"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <label htmlFor="resume-upload" className="cursor-pointer flex flex-col items-center">
+                  <UploadCloud className={`h-11 w-11 mb-2 transition-colors ${file ? 'text-[#00F5A0]' : 'text-slate-500 hover:text-[#FF5C00]'}`} />
+                  
+                  {file ? (
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-white flex items-center justify-center gap-1.5">
+                        <FileCheck className="h-4 w-4 text-[#00F5A0]" />
+                        {file.name}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono">
+                        {(file.size / 1024).toFixed(1)} KB • Ready for ATS Scoring
+                      </p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); handleRemoveFile(); }}
+                        className="mt-2 text-[10px] text-rose-400 hover:text-rose-300 underline font-semibold"
+                      >
+                        Remove and choose another file
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xs font-semibold text-white">
+                        Click to upload or drag &amp; drop resume file
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Supported formats: PDF, DOCX (Max 5MB)
+                      </p>
+                      <div className="mt-3 inline-block px-3 py-1 bg-white/[0.06] rounded-lg text-[10px] font-mono text-slate-300 border border-white/[0.08]">
+                        Mandatory for score calculation
+                      </div>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              {/* Previously Uploaded Resumes */}
+              {resumes.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-white/[0.08]">
+                  <p className="text-[11px] text-slate-400 font-semibold mb-2">
+                    Or select previously uploaded resume:
                   </p>
-                  <div className="space-y-2">
-                    {DEMO_PRESET_RESUMES.map((preset) => (
-                      <div
-                        key={preset.id}
-                        onClick={() => setSelectedPreset(preset)}
-                        className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
-                          selectedPreset.id === preset.id
-                            ? 'bg-[#FF5C00]/15 border-[#FF5C00]/50 shadow-[0_0_15px_rgba(255,92,0,0.25)]'
-                            : 'bg-[#05070B] border-white/[0.06] hover:border-white/[0.15] hover:bg-[#0F1623]'
+                  <div className="flex flex-wrap gap-2">
+                    {resumes.map(r => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => { setSelectedResumeId(r.id); setFile(null); setValidationError(''); }}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all flex items-center gap-1.5 ${
+                          selectedResumeId === r.id && !file
+                            ? 'bg-[#FF5C00]/20 border-[#FF5C00] text-white font-bold'
+                            : 'bg-[#05070B] border-white/[0.08] text-slate-300 hover:border-white/[0.2]'
                         }`}
                       >
-                        <div className="flex items-center gap-3">
-                          <div className={`h-8 w-8 rounded-lg flex items-center justify-center ${
-                            selectedPreset.id === preset.id ? 'bg-[#FF5C00] text-white' : 'bg-[#141D2E] text-slate-400'
-                          }`}>
-                            <FileCheck className="h-4 w-4" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-xs text-white">{preset.candidateName}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">• {preset.experienceLevel}</span>
-                            </div>
-                            <span className="text-[11px] text-[#FFA133] font-medium">{preset.title}</span>
-                          </div>
-                        </div>
-
-                        {selectedPreset.id === preset.id && (
-                          <div className="h-5 w-5 rounded-full bg-[#FF5C00] text-white flex items-center justify-center">
-                            <Check className="h-3 w-3 stroke-[3]" />
-                          </div>
-                        )}
-                      </div>
+                        <FileText className="h-3 w-3 text-[#FF5C00]" />
+                        <span className="truncate max-w-[150px]">{r.fileName}</span>
+                        {selectedResumeId === r.id && !file && <Check className="h-3 w-3 text-[#00F5A0]" />}
+                      </button>
                     ))}
                   </div>
                 </div>
-              ) : (
-                /* Mode B: Sleek Drag & Drop Zone */
-                <div
-                  onDragEnter={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDragOver={handleDrag}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                    file 
-                      ? 'border-[#00F5A0]/50 bg-[#00F5A0]/10' 
-                      : (dragActive ? 'border-[#FF5C00] bg-[#FF5C00]/15' : 'border-white/[0.12] hover:border-[#FF5C00]/40 bg-[#05070B]')
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    id="resume-upload"
-                    accept=".pdf,.docx,.doc"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  <label htmlFor="resume-upload" className="cursor-pointer flex flex-col items-center">
-                    <UploadCloud className={`h-11 w-11 mb-2 transition-colors ${file ? 'text-[#00F5A0]' : 'text-slate-500 group-hover:text-[#FF5C00]'}`} />
-                    {file ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="flex items-center gap-2.5 bg-[#0B1019] px-4 py-2 rounded-xl border border-[#00F5A0]/30 shadow-md">
-                          <FileText className="h-4 w-4 text-[#00F5A0]" />
-                          <span className="text-xs font-bold text-[#00F5A0]">
-                            {file.name}
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-[#05070B] border border-white/[0.08]">
-                            {(file.size / 1024).toFixed(0)} KB
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleRemoveFile();
-                            }}
-                            className="ml-2 text-[11px] bg-rose-950/80 hover:bg-rose-900 text-rose-200 font-semibold px-2 py-0.5 rounded-lg border border-rose-800 transition-colors"
-                            title="Remove file"
-                          >
-                            ✕ Remove
-                          </button>
-                        </div>
-                        <span className="text-[11px] text-slate-400">Click or drag another file to replace</span>
-                      </div>
-                    ) : (
-                      <>
-                        <span className="text-xs font-bold text-white">
-                          Drag & Drop PDF or DOCX file here
-                        </span>
-                        <span className="text-[11px] text-slate-400 mt-1">
-                          Supported formats: PDF, DOCX (Max 10 MB)
-                        </span>
-                      </>
-                    )}
-                  </label>
-                </div>
               )}
             </div>
 
-            {/* Active Resume summary badge */}
-            <div className="p-3 bg-obsidian-950 border border-white/[0.06] rounded-xl flex items-center justify-between text-xs">
-              <span className="text-slate-400">Active Document:</span>
-              <span className="font-mono text-white font-semibold">
-                {uploadMode === 'preset' ? selectedPreset.fileName : (file?.name || 'No file selected')}
-              </span>
+            {/* Bottom Status */}
+            <div className="pt-2 text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Key className="h-3.5 w-3.5 text-[#FFA133]" />
+              <span>Requires backend Gemini API Key for hybrid neural matching</span>
             </div>
           </div>
 
-          {/* Card 2: Target Job Description */}
+          {/* Card 2: Target Job Requisition */}
           <div className="bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl p-6 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl flex flex-col justify-between space-y-4">
             <div>
-              <h2 className="font-display text-xs font-bold uppercase tracking-wider text-white mb-1 flex items-center gap-2">
+              <h2 className="font-display text-xs font-bold uppercase tracking-wider text-white mb-3 flex items-center gap-2">
                 <Briefcase className="h-4 w-4 text-[#00C9FF]" />
-                2. Target Requisition & Role
+                2. Target Job Requisition
               </h2>
-              <p className="text-xs text-slate-400 mb-3 font-sans">Select a live requisition to benchmark against:</p>
 
-              <div className="mb-3">
-                <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 block mb-1">
-                  Active Requisitions
-                </label>
-                <select
-                  value={selectedJobId}
-                  onChange={(e) => {
-                    setSelectedJobId(e.target.value);
-                    setPipelineState('idle');
-                    setActiveMatch(null);
-                    setTailoredResult(null);
-                  }}
-                  className="w-full bg-[#05070B] border border-white/[0.12] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-[#FF5C00] transition-colors font-medium font-sans"
-                >
-                  {jobs.map(j => (
-                    <option key={j.id} value={j.id}>
-                      {j.title} — {j.companyName} ({j.location})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1 font-semibold">
+                    Select Target Job Posting:
+                  </label>
+                  <select
+                    value={selectedJobId}
+                    onChange={(e) => setSelectedJobId(e.target.value)}
+                    className="w-full bg-[#05070B] border border-white/[0.12] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#FF5C00] transition-colors"
+                  >
+                    {jobs.map((job) => (
+                      <option key={job.id} value={job.id}>
+                        {job.title} — {job.companyName} ({job.location})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <div>
-                <label className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 block mb-1">
-                  Or Paste Custom Job Description
-                </label>
-                <textarea
-                  value={customJdText}
-                  onChange={(e) => setCustomJdText(e.target.value)}
-                  rows={ uploadMode === 'preset' ? 3 : 4 }
-                  placeholder="Paste custom requirements or responsibilities..."
-                  className="w-full bg-[#05070B] border border-white/[0.12] rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-[#FF5C00] transition-colors font-sans"
-                />
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1 font-semibold">
+                    Or Paste Custom Job Description:
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={customJdText}
+                    onChange={(e) => setCustomJdText(e.target.value)}
+                    placeholder="Paste job description requirements to benchmark against..."
+                    className="w-full bg-[#05070B] border border-white/[0.12] rounded-xl p-3 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-[#FF5C00] transition-colors resize-none font-mono"
+                  />
+                </div>
               </div>
             </div>
 
-            {/* Main Action CTA Button */}
-            <button
-              onClick={runFullPipeline}
-              disabled={pipelineState !== 'idle' && pipelineState !== 'done'}
-              className="w-full py-4 btn-primary-glow text-white font-bold text-xs uppercase tracking-wider rounded-xl transition-all shadow-[0_10px_30px_rgba(255,92,0,0.35)] flex items-center justify-center gap-2 active:scale-[0.98]"
-            >
-              {pipelineState === 'idle' || pipelineState === 'done' ? (
-                <>
-                  <Sparkles className="h-4 w-4 text-white" />
-                  <span>Compute Hybrid ATS Match Score</span>
-                </>
-              ) : (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin text-white" />
-                  <span>Processing AI Diagnostics...</span>
-                </>
-              )}
-            </button>
+            {/* Compute Button */}
+            <div className="pt-2">
+              <button
+                onClick={runFullPipeline}
+                disabled={!hasResumeReady || pipelineState !== 'idle' && pipelineState !== 'done'}
+                className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-lg ${
+                  hasResumeReady && (pipelineState === 'idle' || pipelineState === 'done')
+                    ? 'bg-gradient-to-r from-[#FF5C00] to-[#FF7A00] hover:from-[#FF6E1A] hover:to-[#FF8D24] text-white shadow-[0_0_20px_rgba(255,92,0,0.35)] cursor-pointer active:scale-[0.99]'
+                    : 'bg-white/[0.05] text-slate-500 border border-white/[0.08] cursor-not-allowed'
+                }`}
+              >
+                {pipelineState === 'uploading' && (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Uploading Resume Document...</span>
+                  </>
+                )}
+                {pipelineState === 'parsing' && (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Extracting Skills &amp; Credentials...</span>
+                  </>
+                )}
+                {pipelineState === 'embedding' && (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Generating Gemini 3072-Dim Embeddings...</span>
+                  </>
+                )}
+                {pipelineState === 'scoring' && (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Computing Hybrid Lexical &amp; Semantic Match...</span>
+                  </>
+                )}
+                {(pipelineState === 'idle' || pipelineState === 'done') && (
+                  <>
+                    <Sparkles className="h-4 w-4 stroke-[2.5]" />
+                    <span>
+                      {hasResumeReady ? 'Compute Genuine ATS Match Score' : 'Upload Resume PDF to Compute Score'}
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
         </div>
 
-        {/* Pipeline Stepper Shimmer Animation */}
-        {pipelineState !== 'idle' && (
-          <div className="bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl p-5 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl">
-            <h3 className="font-display text-xs font-bold text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Layers className="h-4 w-4 text-[#FFA133]" />
-              Hybrid AI Processing Stages
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-              <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all ${
-                pipelineState === 'parsing' 
-                  ? 'bg-[#FF5C00]/20 border-[#FF5C00] text-[#FFA133] animate-pulse' 
-                  : (pipelineState === 'embedding' || pipelineState === 'scoring' || pipelineState === 'done' ? 'bg-[#05070B] border-[#00F5A0]/30 text-[#00F5A0]' : 'bg-[#05070B] border-white/[0.06] text-slate-500')
-              }`}>
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span className="font-semibold">1. Entity Extraction</span>
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all ${
-                pipelineState === 'embedding' 
-                  ? 'bg-[#FF5C00]/20 border-[#FF5C00] text-[#FFA133] animate-pulse' 
-                  : (pipelineState === 'scoring' || pipelineState === 'done' ? 'bg-[#05070B] border-[#00F5A0]/30 text-[#00F5A0]' : 'bg-[#05070B] border-white/[0.06] text-slate-500')
-              }`}>
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span className="font-semibold">2. Vector Embeddings</span>
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all ${
-                pipelineState === 'scoring' 
-                  ? 'bg-[#FF5C00]/20 border-[#FF5C00] text-[#FFA133] animate-pulse' 
-                  : (pipelineState === 'done' ? 'bg-[#05070B] border-[#00F5A0]/30 text-[#00F5A0]' : 'bg-[#05070B] border-white/[0.06] text-slate-500')
-              }`}>
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span className="font-semibold">3. Hybrid ATS Score</span>
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center gap-2.5 transition-all ${
-                pipelineState === 'done' 
-                  ? 'bg-[#00F5A0]/15 border-[#00F5A0]/40 text-[#00F5A0] font-bold' 
-                  : 'bg-[#05070B] border-white/[0.06] text-slate-500'
-              }`}>
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span>4. Diagnostics Ready</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Results Section */}
-        {pipelineState === 'idle' && !activeMatch && (
-          <div className="bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl">
-            <EmptyState
-              variant="no-resume"
-              onAction={() => runFullPipeline()}
-              actionLabel="Compute ATS Score"
-            />
-          </div>
-        )}
-
+        {/* ATS Score & Diagnostic Matrix Results */}
         {activeMatch && (
-          <div className="space-y-8 animate-in fade-in duration-500">
+          <div className="space-y-8 animate-in fade-in duration-300">
             
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            {/* Score & Gaps Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
-              {/* Refined Score Gauge */}
-              <div className="lg:col-span-1">
+              {/* Score Gauge */}
+              <div className="lg:col-span-1 space-y-4">
                 <ScoreGauge
                   finalScore={activeMatch.finalScore}
                   lexicalScore={activeMatch.lexicalScore}
                   semanticScore={activeMatch.semanticScore}
                 />
+                {activeMatch.explanation && (
+                  <div className="bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl p-4 text-xs text-slate-300 leading-relaxed shadow-sm">
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#FFA133] mb-1">
+                      ATS Scoring Summary
+                    </div>
+                    {activeMatch.explanation}
+                  </div>
+                )}
               </div>
 
-              {/* Natural Language Rationale & Skill Gap Matrix */}
-              <div className="lg:col-span-2 bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl p-6 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl space-y-5">
-                
-                <div className="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-[#FFA133]" />
-                    <h3 className="font-display text-xs font-bold uppercase tracking-wider text-white">
-                      AI Explainability Assessment
-                    </h3>
-                  </div>
-                  <span className="text-[10px] font-mono text-[#00C9FF] bg-[#00C9FF]/10 px-2.5 py-0.5 rounded-full border border-[#00C9FF]/25">
-                    Target: {currentSelectedJob.companyName}
-                  </span>
-                </div>
-
-                <p className="text-xs text-slate-300 leading-relaxed font-sans bg-[#05070B] p-4 rounded-xl border border-white/[0.06]">
-                  {activeMatch.explanation}
-                </p>
-
-                {/* Skill Gap Matrix Component */}
+              {/* Skill Gap Matrix */}
+              <div className="lg:col-span-2">
                 <SkillGapMatrix
-                  matchedSkills={activeMatch.matchedSkills}
-                  missingSkills={activeMatch.missingSkills}
-                  skillGaps={activeMatch.skillGaps}
-                  onTailorClick={handleGenerateTailored}
+                  skillGaps={activeMatch.skillGaps || []}
+                  matchedSkills={activeMatch.matchedSkills || []}
+                  missingSkills={activeMatch.missingSkills || []}
                 />
               </div>
 
             </div>
 
-            {/* Tailored Diff Studio */}
-            {loadingTailor && (
-              <div className="p-8 text-center bg-[#0B1019]/85 border border-white/[0.09] rounded-2xl space-y-3 shadow-[0_16px_40px_rgba(0,0,0,0.7)] backdrop-blur-xl">
-                <Loader2 className="h-8 w-8 animate-spin text-[#FF5C00] mx-auto" />
-                <p className="text-xs text-slate-300 font-semibold font-mono">
-                  Generating verified bullet rephrasings with target keywords...
-                </p>
+            {/* Tailor Action Banner */}
+            {!tailoredResult && (
+              <div className="bg-gradient-to-r from-[#FF5C00]/15 via-[#0B1019] to-[#0B1019] border border-[#FF5C00]/30 rounded-2xl p-6 shadow-[0_16px_40px_rgba(255,92,0,0.15)] flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-[#FFA133] text-xs font-bold uppercase tracking-wider font-mono">
+                    <Sparkles className="h-4 w-4" />
+                    <span>Intelligent Resume Optimization Engine</span>
+                  </div>
+                  <h3 className="text-base font-bold text-white mt-1">
+                    Ready to generate your tailored 1-page resume?
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Inject missing target competencies while 100% preserving your authentic education, GPA, and projects.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleGenerateTailored}
+                  disabled={loadingTailor}
+                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-[#FF5C00] to-[#FF7A00] hover:from-[#FF6E1A] hover:to-[#FF8D24] text-white text-xs font-bold transition-all shadow-[0_0_20px_rgba(255,92,0,0.35)] flex items-center gap-2 shrink-0 active:scale-95 disabled:opacity-60"
+                >
+                  {loadingTailor ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-white" />
+                      <span>Synthesizing 1-Page Layout...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 stroke-[2.5]" />
+                      <span>Generate Tailored 1-Page Resume</span>
+                    </>
+                  )}
+                </button>
               </div>
             )}
 
-            {tailoredResult && !loadingTailor && (
-              <TailoredDiffView
-                versionNumber={tailoredResult.tailoredResume?.version || 2}
-                tailoredText={tailoredResult.tailoredText || tailoredResult.tailoredResume?.rawText || ''}
-                beforeAfterDiff={tailoredResult.beforeAfterDiff || []}
-                matchedSkillsAdded={tailoredResult.matchedSkillsAdded || []}
-              />
+            {/* Tailored Diff & 1-Page Document View */}
+            {tailoredResult && (
+              <div className="animate-in fade-in duration-300">
+                <TailoredDiffView
+                  versionNumber={tailoredResult.tailoredResume?.version || 2}
+                  tailoredText={tailoredResult.tailoredText}
+                  beforeAfterDiff={tailoredResult.beforeAfterDiff || []}
+                  matchedSkillsAdded={tailoredResult.matchedSkillsAdded || []}
+                  candidateName={tailoredResult.candidateName}
+                  contactInfo={tailoredResult.contactInfo}
+                  targetTitle={tailoredResult.targetTitle}
+                  summary={tailoredResult.summary}
+                  skills={tailoredResult.skills}
+                  education={tailoredResult.education}
+                  projects={tailoredResult.projects}
+                  experience={tailoredResult.experience}
+                />
+              </div>
             )}
 
           </div>

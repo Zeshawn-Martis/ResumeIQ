@@ -160,8 +160,15 @@ def extract_job_requirements(job_description: str) -> List[Dict[str, Any]]:
         return requirements
 
     prompt = f"""
+You are an expert technical recruiting analyst and ontology engine.
 Analyze the following Job Description and extract key required technical skills, tools, and technical domain competencies into structured JSON.
-Do NOT extract sentence fragments or verbs like 'designs', 'implements', or 'maintains'. Extract exact technical skill names (e.g. 'Cybersecurity', 'Threat Detection', 'Vulnerability Assessment', 'Incident Response', 'Security Monitoring').
+
+INTELLIGENCE GUIDELINES:
+1. Do NOT extract sentence fragments, descriptive phrases, or verbs (e.g., never extract 'designs', 'implements', 'protect', 'involves', 'maintains'). Extract clean, recognized technical skills and competencies (e.g. 'Cybersecurity', 'Threat Detection', 'Vulnerability Assessment', 'Incident Response', 'Security Monitoring', 'Python', 'Docker', 'SIEM', 'AWS').
+2. USE INTELLIGENT SENSE FOR IMPORTANCE:
+   - "must_have": Core technical requirements, non-negotiable foundations, primary programming languages/frameworks, and fundamental domain pillars essential to succeed in the role.
+   - "nice_to_have": Bonus qualifications, preferred tools, secondary frameworks, or 'plus'/'beneficial' skills.
+3. Assign confidence scores between 0.85 and 0.99.
 
 JSON Schema:
 {{
