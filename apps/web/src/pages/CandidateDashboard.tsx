@@ -28,7 +28,14 @@ import {
 export const CandidateDashboard: React.FC = () => {
   const { user, token } = useAuth();
 
+  const isDemoUser = Boolean(
+    user?.isGuest ||
+    user?.email === 'candidate@demo.com' ||
+    user?.email?.includes('guest') ||
+    user?.email?.endsWith('@guest.resumeiq.app')
+  );
 
+  const [demoResume, setDemoResume] = useState<ResumeVersion | null>(null);
   const [selectedResumeId, setSelectedResumeId] = useState<string>('');
   const [jobs, setJobs] = useState<JobPosting[]>(DEMO_JOBS);
   const [selectedJobId, setSelectedJobId] = useState<string>(DEMO_JOBS[0].id);
@@ -49,8 +56,37 @@ export const CandidateDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchJobs();
+    if (isDemoUser && token) {
+      fetchDemoResume();
+    }
+  }, [isDemoUser, token]);
 
-  }, []);
+  const fetchDemoResume = async () => {
+    try {
+      const res = await fetch('/api/resumes', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const demoPool = data.filter((r: any) =>
+            r.fileName && (
+              r.fileName.toLowerCase().includes('demo') ||
+              r.fileName.toLowerCase().includes('alex') ||
+              r.fileName.toLowerCase().includes('priya') ||
+              r.fileName.toLowerCase().includes('marcus')
+            )
+          );
+          const pool = demoPool.length > 0 ? demoPool : data;
+          const randomPicked = pool[Math.floor(Math.random() * pool.length)];
+          setDemoResume(randomPicked);
+          setSelectedResumeId(randomPicked.id);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const fetchJobs = async () => {
     try {
@@ -127,8 +163,8 @@ export const CandidateDashboard: React.FC = () => {
     setActiveMatch(null);
     setTailoredResult(null);
 
-    // Mandatory upload validation: either a file has been selected or an existing uploaded resume is picked
-    if (!file) {
+    // Mandatory upload validation: file required for normal users, or preselected demo file for instant demo users
+    if (!file && !(isDemoUser && selectedResumeId)) {
       setValidationError('Resume upload required: Please upload a resume PDF/DOCX file to compute your ATS score.');
       return;
     }
@@ -241,7 +277,7 @@ export const CandidateDashboard: React.FC = () => {
   };
 
   const currentSelectedJob = jobs.find(j => j.id === selectedJobId) || jobs[0] || DEMO_JOBS[0];
-  const hasResumeReady = Boolean(file);
+  const hasResumeReady = Boolean(file || (isDemoUser && selectedResumeId));
 
   return (
     <div className="relative min-h-screen">
@@ -369,7 +405,42 @@ export const CandidateDashboard: React.FC = () => {
                 </label>
               </div>
 
-              </div>
+              {/* 1 Random Demo Resume File - STRICTLY visible ONLY for Instant Demo users */}
+              {isDemoUser && demoResume && (
+                <div className="mt-4 pt-4 border-t border-white/[0.08]">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] text-[#FFA133] font-semibold flex items-center gap-1.5 font-mono">
+                      <Sparkles className="h-3 w-3 text-[#FFA133]" />
+                      Instant Demo Sample File:
+                    </p>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      (Click to test or drag & drop your own)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedResumeId(demoResume.id);
+                      setFile(null);
+                      setValidationError('');
+                    }}
+                    className={`px-3.5 py-2 rounded-xl text-[11px] font-medium border transition-all flex items-center gap-2.5 ${
+                      selectedResumeId === demoResume.id && !file
+                        ? 'bg-[#FF5C00]/20 border-[#FF5C00] text-white font-bold shadow-[0_0_15px_rgba(255,92,0,0.25)]'
+                        : 'bg-[#05070B] border-white/[0.08] text-slate-300 hover:border-white/[0.2]'
+                    }`}
+                  >
+                    <FileText className="h-3.5 w-3.5 text-[#FF5C00]" />
+                    <span className="font-mono">{demoResume.fileName}</span>
+                    {selectedResumeId === demoResume.id && !file && (
+                      <span className="px-1.5 py-0.5 rounded bg-[#00F5A0]/20 text-[#00F5A0] text-[9px] font-bold border border-[#00F5A0]/30 flex items-center gap-1">
+                        <Check className="h-2.5 w-2.5" /> Selected
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Bottom Status */}
             <div className="pt-2 text-[11px] text-slate-400 flex items-center gap-1.5">
