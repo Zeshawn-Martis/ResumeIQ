@@ -28,7 +28,7 @@ import {
 export const CandidateDashboard: React.FC = () => {
   const { user, token } = useAuth();
 
-  const [resumes, setResumes] = useState<ResumeVersion[]>([]);
+
   const [selectedResumeId, setSelectedResumeId] = useState<string>('');
   const [jobs, setJobs] = useState<JobPosting[]>(DEMO_JOBS);
   const [selectedJobId, setSelectedJobId] = useState<string>(DEMO_JOBS[0].id);
@@ -49,7 +49,7 @@ export const CandidateDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchJobs();
-    fetchResumes();
+
   }, []);
 
   const fetchJobs = async () => {
@@ -69,25 +69,6 @@ export const CandidateDashboard: React.FC = () => {
     }
   };
 
-  const fetchResumes = async () => {
-    if (!token) return;
-    try {
-      const res = await fetch('/api/resumes', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          setResumes(data);
-          if (data.length > 0 && !selectedResumeId) {
-            setSelectedResumeId(data[0].id);
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-  };
 
   const handleResetWorkspace = () => {
     setFile(null);
@@ -147,7 +128,7 @@ export const CandidateDashboard: React.FC = () => {
     setTailoredResult(null);
 
     // Mandatory upload validation: either a file has been selected or an existing uploaded resume is picked
-    if (!file && !selectedResumeId) {
+    if (!file) {
       setValidationError('Resume upload required: Please upload a resume PDF/DOCX file to compute your ATS score.');
       return;
     }
@@ -178,7 +159,7 @@ export const CandidateDashboard: React.FC = () => {
         if (!resumeIdToScore) throw new Error('Resume record was not created properly.');
         
         setSelectedResumeId(resumeIdToScore);
-        fetchResumes();
+    
       }
 
       // 2. Parse & Embedding stage
@@ -247,7 +228,7 @@ export const CandidateDashboard: React.FC = () => {
       if (res.ok) {
         const data = await res.json();
         setTailoredResult(data);
-        fetchResumes();
+    
       } else {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Tailoring service returned an error.');
@@ -260,7 +241,7 @@ export const CandidateDashboard: React.FC = () => {
   };
 
   const currentSelectedJob = jobs.find(j => j.id === selectedJobId) || jobs[0] || DEMO_JOBS[0];
-  const hasResumeReady = Boolean(file || selectedResumeId);
+  const hasResumeReady = Boolean(file);
 
   return (
     <div className="relative min-h-screen">
@@ -388,33 +369,7 @@ export const CandidateDashboard: React.FC = () => {
                 </label>
               </div>
 
-              {/* Previously Uploaded Resumes */}
-              {resumes.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-white/[0.08]">
-                  <p className="text-[11px] text-slate-400 font-semibold mb-2">
-                    Or select previously uploaded resume:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {resumes.map(r => (
-                      <button
-                        key={r.id}
-                        type="button"
-                        onClick={() => { setSelectedResumeId(r.id); setFile(null); setValidationError(''); }}
-                        className={`px-3 py-1.5 rounded-lg text-[11px] font-medium border transition-all flex items-center gap-1.5 ${
-                          selectedResumeId === r.id && !file
-                            ? 'bg-[#FF5C00]/20 border-[#FF5C00] text-white font-bold'
-                            : 'bg-[#05070B] border-white/[0.08] text-slate-300 hover:border-white/[0.2]'
-                        }`}
-                      >
-                        <FileText className="h-3 w-3 text-[#FF5C00]" />
-                        <span className="truncate max-w-[150px]">{r.fileName}</span>
-                        {selectedResumeId === r.id && !file && <Check className="h-3 w-3 text-[#00F5A0]" />}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+              </div>
 
             {/* Bottom Status */}
             <div className="pt-2 text-[11px] text-slate-400 flex items-center gap-1.5">
