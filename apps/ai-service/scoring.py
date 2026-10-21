@@ -73,10 +73,12 @@ def get_embedding(text: str) -> List[float]:
     if client:
         try:
             res = client.models.embed_content(
-                model="text-embedding-004",
+                model="gemini-embedding-001",
                 contents=text[:2000]
             )
-            if res.embedding and res.embedding.values:
+            if hasattr(res, 'embeddings') and res.embeddings:
+                return res.embeddings[0].values
+            if hasattr(res, 'embedding') and hasattr(res.embedding, 'values'):
                 return res.embedding.values
         except Exception as e:
             print(f"Gemini embedding error: {e}")
